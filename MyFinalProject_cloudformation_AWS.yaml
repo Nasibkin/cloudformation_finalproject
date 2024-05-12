@@ -1,0 +1,437 @@
+# 1) You can choose EnvironmentName as Virginia or Oregon, the content of the website will be changed accordingly
+# 2) You can choose SubnetType either Public or Public and Private
+# 3) If you choose Public Subnet the NAT gateway and EIP won't be created (Condition: IsPublicAndPrivate)
+# 4) If you choose PublicAndPrivate Subnet, the auto scaling will jump from private to public subnets, and from the content of the website you will know either it is public or private subnet
+# 5) Choose Key Pair right from the parameters section, as you might want to deploy the website from different regions
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: My Final Project
+
+Parameters:
+
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+    Default: Virginia
+    AllowedValues:
+      - Virginia
+      - Oregon
+  
+  Tag:
+    Description: My Name
+    Type: String
+    Default: Nasiba
+
+  SubnetType:
+    Description: Choose subnet type
+    Type: String
+    Default: Public
+    AllowedValues:
+      - Public
+      - PublicAndPrivate
+
+  KeyName:
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: Nasibademo
+  
+  InstanceType:
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+    ConstraintDescription: must be a valid EC2 instance type.
+    Description: WebServer EC2 instance type
+    Type: String
+    Default: t2.micro
+  
+  VPCCIDR:
+    Description: CIDR block for the VPC
+    ConstraintDescription: Must be a valid CIDR block.
+    Type: String
+    AllowedValues:
+      - 10.0.0.0/16
+      - 11.0.0.0/16
+      - 12.0.0.0/16
+      - 13.0.0.0/16
+      - 14.0.0.0/16
+    Default: 10.0.0.0/16
+
+  PrivateSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+    Type: String
+    Default: 10.0.1.0/24
+
+  PrivateSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
+    Type: String
+    Default: 10.0.2.0/24
+
+  PublicSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+    Type: String
+    Default: 10.0.3.0/24
+
+  PublicSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Type: String
+    Default: 10.0.4.0/24
+
+Mappings:
+
+  RegionMap:
+    us-east-1:
+      AMI: ami-0c101f26f147fa7fd
+    us-west-2:
+      AMI: ami-0a70b9d193ae8a799
+
+Conditions:
+  IsVirginia: !Equals [ !Ref EnvironmentName, 'Virginia' ]
+  
+  IsPublic: !Equals [ !Ref SubnetType, 'Public' ]
+  IsPublicAndPrivate: !Equals [ !Ref SubnetType, 'PublicAndPrivate' ]
+
+Resources:
+
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: FinalProjectVPC 
+        - Key: Owner
+          Value: !Ref Tag
+  
+  MyPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub "${AWS::Region}a"
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: privatesubnet1 
+        - Key: Owner
+          Value: !Ref Tag
+      VpcId: !Ref MyVPC
+
+  MyPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub "${AWS::Region}b"
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: privatesubnet2 
+        - Key: Owner
+          Value: !Ref Tag
+      VpcId: !Ref MyVPC
+
+  MyPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub "${AWS::Region}c"
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: publicsubnet1
+        - Key: Owner
+          Value: !Ref Tag
+      VpcId: !Ref MyVPC
+
+  MyPublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub "${AWS::Region}d"
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: publicsubnet2 
+        - Key: Owner
+          Value: !Ref Tag
+      VpcId: !Ref MyVPC
+
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: 
+        - Key: Name
+          Value: final-igw
+        - Key: Owner
+          Value: !Ref Tag
+  
+  AttachIGWtoVPC:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref MyInternetGateway
+      VpcId: !Ref MyVPC
+
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    Condition: IsPublicAndPrivate
+    DependsOn: AttachIGWtoVPC
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Condition: IsPublicAndPrivate
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref MyPublicSubnet1
+      Tags:
+        - Key: Name
+          Value: FinalNatGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags: 
+        - Key: Name
+          Value: Public-RT
+        - Key: Owner
+          Value: !Ref Tag
+
+  MyPublicRouteTableRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachIGWtoVPC
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyInternetGateway
+  
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags: 
+        - Key: Name
+          Value: Private-RT
+        - Key: Owner
+          Value: !Ref Tag
+  
+  MyPrivateRouteTableRoute:
+    Type: AWS::EC2::Route
+    Condition: IsPublicAndPrivate
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PublicSubnet1Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref MyPublicSubnet1
+
+  PublicSubnet2Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref MyPublicSubnet2
+
+
+  PrivateSubnet1Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref MyPrivateSubnet1
+
+  PrivateSubnet2Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref MyPrivateSubnet2
+
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    Properties:
+      GroupName: FINAL-SSH-HTTP-SG
+      GroupDescription: Allow SSH and HTTP
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+      - CidrIp: 0.0.0.0/0
+        FromPort: 80
+        IpProtocol: tcp
+        ToPort: 80
+      - CidrIp: 0.0.0.0/0
+        FromPort: 22
+        IpProtocol: tcp
+        ToPort: 22
+      Tags:
+        - Key: Owner
+          Value: !Ref Tag
+
+  MyLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: FinalLaunchTemplate
+      LaunchTemplateData:
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Owner
+                Value: !Ref Tag
+        ImageId: !FindInMap
+          - RegionMap
+          - !Ref 'AWS::Region'
+          - AMI
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyName
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            Groups: 
+              - !Ref WebServerSecurityGroup
+        UserData:
+          Fn::Base64: !If
+          - IsVirginia
+          - !Sub |
+              #!/bin/bash
+              yum update -y
+              yum install -y httpd
+              systemctl start httpd
+              systemctl enable httpd
+              echo "<h1>Hello Virginia!, Hostname: $(hostname)</h1>" > /var/www/html/index.html
+              host_ip=$(hostname -I | awk '{print $1}')
+              if [[ $host_ip == 10.0.1.* || $host_ip == 10.0.2.* ]]; then
+                echo "Hello Private" >> /var/www/html/index.html
+              elif [[ $host_ip == 10.0.3.* || $host_ip == 10.0.4.* ]]; then
+                echo "Hello Public" >> /var/www/html/index.html
+              else 
+                echo "Unknown subnet" >> /var/www/html/index.html
+              fi
+          - !Sub |
+              #!/bin/bash
+              yum update -y
+              yum install -y httpd
+              systemctl start httpd
+              systemctl enable httpd
+              echo "<h1>Hello Oregon!, Hostname: $(hostname)</h1>" > /var/www/html/index.html
+              host_ip=$(hostname -I | awk '{print $1}')
+              if [[ $host_ip == 10.0.1.* || $host_ip == 10.0.2.* ]]; then
+                echo "Hello Private" >> /var/www/html/index.html
+              elif [[ $host_ip == 10.0.3.* || $host_ip == 10.0.4.* ]]; then
+                echo "Hello Public" >> /var/www/html/index.html
+              else 
+                echo "Unknown subnet" >> /var/www/html/index.html
+              fi
+
+  MyAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    UpdatePolicy:
+      AutoScalingReplacingUpdate:
+        WillReplace: true
+    DeletionPolicy: Delete
+    Properties:
+      MinSize: '3'
+      MaxSize: '5'
+      DesiredCapacity: '4'
+      LaunchTemplate:
+        LaunchTemplateId: !Ref MyLaunchTemplate
+        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
+      HealthCheckType: ELB
+      VPCZoneIdentifier:
+        !If
+          - IsPublicAndPrivate
+          - - !Ref MyPrivateSubnet1
+            - !Ref MyPrivateSubnet2
+            - !Ref MyPublicSubnet1
+            - !Ref MyPublicSubnet2
+          - - !Ref MyPublicSubnet1
+            - !Ref MyPublicSubnet2
+      TargetGroupARNs: 
+        - !Ref MyALBTargetGroups
+
+  cpuUsage:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref MyAutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 50
+  
+  ScalingPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref MyAutoScalingGroup
+      ScalingAdjustment: '1'
+  
+  CloudWatchAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      EvaluationPeriods: '1'
+      Statistic: Average
+      Threshold: '50'
+      AlarmDescription: Alarm if CPU higher than 50%
+      Period: '60'
+      AlarmActions:
+        - !Ref ScalingPolicy
+      Namespace: AWS/EC2
+      Dimensions:
+        - Name: MyAutoScalingGroupName
+          Value:
+            Ref: MyAutoScalingGroup
+      ComparisonOperator: GreaterThanThreshold
+      MetricName: CPUUtilization
+
+  MyALBTargetGroups:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref MyVPC
+      TargetType: instance
+      HealthCheckPath: /index.html
+      Port: 80
+      Protocol: HTTP
+      Tags:
+        - Key: Name
+          Value: FinalTG
+  
+  MyALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      SecurityGroups:
+      - !Ref WebServerSecurityGroup
+      Subnets:
+        !If
+          - IsPublicAndPrivate
+          - - !Ref MyPrivateSubnet1
+            - !Ref MyPrivateSubnet2
+            - !Ref MyPublicSubnet1
+            - !Ref MyPublicSubnet2
+          - - !Ref MyPublicSubnet1
+            - !Ref MyPublicSubnet2
+      Tags:
+        - Key: Name
+          Value: MyALB
+        - Key: Owner
+          Value: !Ref Tag
+  
+  MyALBlistener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref MyALBTargetGroups
+      LoadBalancerArn: !Ref MyALB
+  
+Outputs:
+  MyDNSOutput:
+    Description: The DNSName of the backup load balancer
+    Value: !GetAtt MyALB.DNSName
